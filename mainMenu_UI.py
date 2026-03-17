@@ -1,37 +1,43 @@
 import tkinter as tk
 
-
 class MainMenuUI:
     def __init__(self, root, client):
         self.client = client
+        self.root = root
+        # Create a container frame
         self.frame = tk.Frame(root)
         self.frame.pack(expand=True, fill="both")
 
-        tk.Label(self.frame, text="MESH P2P WORKSPACE", font=("Arial", 16, "bold")).pack(pady=20)
+        tk.Label(self.frame, text="P2P SHARED WORKSPACE", font=("Arial", 16, "bold")).pack(pady=20)
 
-        # Peer Connection Box
-        conn_frame = tk.LabelFrame(self.frame, text="Connect to a Peer", padx=10, pady=10)
-        conn_frame.pack(pady=10)
+        self.buttons = {}
+        modes = [("🎨 Canvas Drawing", "canvas"), ("📝 Text Editor", "text"), ("📹 Video Call", "video")]
 
-        tk.Label(conn_frame, text="IP:").grid(row=0, column=0)
-        self.ip_ent = tk.Entry(conn_frame);
-        self.ip_ent.insert(0, "127.0.0.1")
-        self.ip_ent.grid(row=0, column=1)
+        for text, mode in modes:
+            btn = tk.Button(self.frame, text=text, width=25, height=2,
+                            command=lambda m=mode: self.client.set_mode(m))
+            btn.pack(pady=5)
+            self.buttons[mode] = btn
 
-        tk.Label(conn_frame, text="Port:").grid(row=1, column=0)
-        self.port_ent = tk.Entry(conn_frame, width=10);
-        self.port_ent.insert(0, "5000")
-        self.port_ent.grid(row=1, column=1)
+        self.status = tk.Label(self.frame, text="Connected! Choose a tool.", fg="green")
+        self.status.pack(pady=20)
 
-        tk.Button(conn_frame, text="Join Mesh", command=self.add_peer).grid(row=2, columnspan=2, pady=5)
+        legend_frame = tk.Frame(self.frame)
+        legend_frame.pack(pady=10)
+        tk.Label(legend_frame, text="You", bg="lightblue", width=8).pack(side=tk.LEFT, padx=5)
+        tk.Label(legend_frame, text="Peer", bg="khaki", width=8).pack(side=tk.LEFT, padx=5)
 
-        # Tool Selection
-        tk.Button(self.frame, text="🎨 Canvas Drawing", width=25, command=lambda: client.set_mode("canvas")).pack(pady=5)
-        tk.Button(self.frame, text="📝 Text Editor", width=25, command=lambda: client.set_mode("text")).pack(pady=5)
-        tk.Button(self.frame, text="📹 Video Call", width=25, command=lambda: client.set_mode("video")).pack(pady=5)
-
-    def add_peer(self):
-        self.client.connect_to_peer(self.ip_ent.get(), self.port_ent.get())
+    def update_selection_visuals(self, my_mode, peer_mode):
+        for mode, btn in self.buttons.items():
+            if my_mode == mode and peer_mode == mode:
+                btn.config(bg="lightgreen")
+            elif my_mode == mode:
+                btn.config(bg="lightblue")
+            elif peer_mode == mode:
+                btn.config(bg="khaki")
+            else:
+                btn.config(bg="SystemButtonFace")
 
     def destroy(self):
+        """CRITICAL: This wipes the specific frame to prevent duplicates."""
         self.frame.destroy()
