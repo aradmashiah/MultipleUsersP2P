@@ -7,46 +7,31 @@ class MainMenuUI:
         self.frame = tk.Frame(root)
         self.frame.pack(expand=True, fill="both")
 
-        tk.Label(self.frame, text="P2P SHARED WORKSPACE", font=("Arial", 16, "bold")).pack(pady=20)
+        tk.Label(self.frame, text="MESH P2P WORKSPACE", font=("Arial", 16, "bold")).pack(pady=20)
 
-        self.buttons = {}
+        # Peer Connection Box
+        conn_frame = tk.LabelFrame(self.frame, text="Connect to a Peer", padx=10, pady=10)
+        conn_frame.pack(pady=10)
 
-        self.buttons["canvas"] = tk.Button(self.frame, text="🎨 Canvas Drawing", width=25, height=2,
-                                           command=lambda: client.set_mode("canvas"))
-        self.buttons["canvas"].pack(pady=10)
+        tk.Label(conn_frame, text="IP:").grid(row=0, column=0)
+        self.ip_ent = tk.Entry(conn_frame);
+        self.ip_ent.insert(0, "127.0.0.1")
+        self.ip_ent.grid(row=0, column=1)
 
-        self.buttons["text"] = tk.Button(self.frame, text="📝 Text Editor", width=25, height=2,
-                                         command=lambda: client.set_mode("text"))
-        self.buttons["text"].pack(pady=10)
+        tk.Label(conn_frame, text="Port:").grid(row=1, column=0)
+        self.port_ent = tk.Entry(conn_frame, width=10);
+        self.port_ent.insert(0, "5000")
+        self.port_ent.grid(row=1, column=1)
 
-        self.buttons["video"] = tk.Button(self.frame, text="📹 Video Call", width=25, height=2,
-                                          command=lambda: client.set_mode("video"))
-        self.buttons["video"].pack(pady=10)
+        tk.Button(conn_frame, text="Join Mesh", command=self.add_peer).grid(row=2, columnspan=2, pady=5)
 
-        self.status = tk.Label(self.frame, text="Connected! Choose a tool.", fg="green")
-        self.status.pack(pady=20)
+        # Tool Selection
+        tk.Button(self.frame, text="🎨 Canvas Drawing", width=25, command=lambda: client.set_mode("canvas")).pack(pady=5)
+        tk.Button(self.frame, text="📝 Text Editor", width=25, command=lambda: client.set_mode("text")).pack(pady=5)
+        tk.Button(self.frame, text="📹 Video Call", width=25, command=lambda: client.set_mode("video")).pack(pady=5)
 
-        legend_frame = tk.Frame(self.frame)
-        legend_frame.pack(pady=10)
-        tk.Label(legend_frame, text="You", bg="lightblue", width=10).side_pack = tk.Label(legend_frame, text="You",
-                                                                                          bg="lightblue", width=8).pack(
-            side=tk.LEFT, padx=5)
-        tk.Label(legend_frame, text="Peer", bg="khaki", width=8).pack(side=tk.LEFT, padx=5)
-
-    def update_selection_visuals(self, my_mode, peer_mode):
-        """Updates button colors: Blue for you, Yellow for peer, Green for both."""
-        for mode, btn in self.buttons.items():
-            if my_mode == mode and peer_mode == mode:
-                btn.config(bg="lightgreen")
-            elif my_mode == mode:
-                btn.config(bg="lightblue")
-            elif peer_mode == mode:
-                btn.config(bg="khaki")
-            else:
-                btn.config(bg="SystemButtonFace")
-
-    def update_status(self, text, color="orange"):
-        self.status.config(text=text, fg=color)
+    def add_peer(self):
+        self.client.connect_to_peer(self.ip_ent.get(), self.port_ent.get())
 
     def destroy(self):
         self.frame.destroy()
