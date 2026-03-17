@@ -23,7 +23,7 @@ class Client:
         self.is_ready = False
         self.lock = threading.Lock()
 
-        threading.Thread(target=self._connect_to_manager, daemon=True).start()
+        threading.Thread(target=self._connect_to_manager,args=(self.manager_ip, ), daemon=True).start()
 
         # Inside SimpleClient.py
 
