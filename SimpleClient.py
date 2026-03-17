@@ -5,7 +5,7 @@ from protocol import Protocol
 
 
 class Client:
-    def __init__(self, root, port, peer_ip, peer_port, manager_ip="127.0.0.1"):
+    def __init__(self, root, port, peer_ip, peer_port, manager_ip):
         self.root = root
         self.port = port
         self.peer_ip, self.peer_port = peer_ip, peer_port
