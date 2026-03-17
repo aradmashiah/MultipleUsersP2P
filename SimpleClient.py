@@ -25,14 +25,22 @@ class Client:
 
         threading.Thread(target=self._connect_to_manager, daemon=True).start()
 
-    def _connect_to_manager(self):
-        while not self.manager_sock:
-            try:
-                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                s.connect((self.manager_ip, 9999))
-                self.manager_sock = s
-            except:
-                time.sleep(2)
+        # Inside SimpleClient.py
+
+        def _connect_to_manager(self, ip):
+            while not self.manager_sock:
+                try:
+                    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    s.connect((ip, 9999))
+                    self.manager_sock = s
+                    print("[+] Reporting to Manager Server.")
+
+                    # NEW: Immediately identify this P2P session to the Manager
+                    # Format: ID:MyListeningPort:PeerIP:PeerPort
+                    id_packet = f"ID:{self.port}:{self.peer_ip}:{self.peer_port}"
+                    self.manager_sock.sendall(Protocol.prepare_packet(id_packet))
+                except:
+                    time.sleep(2)
 
     def auto_connect(self):
         threading.Thread(target=self._listen_task, daemon=True).start()

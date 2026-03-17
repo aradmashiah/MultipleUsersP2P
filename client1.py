@@ -8,8 +8,8 @@ PEER_PORT = 8001
 root = tk.Tk()
 root.title("P2P Shared Space")
 root.geometry("400x500")
-
-client = Client(root, MY_PORT, PEER_IP, PEER_PORT)
+manager_ip = "127.0.0.1"
+client = Client(root, MY_PORT, PEER_IP, PEER_PORT, manager_ip)
 client.auto_connect()
 
 root.mainloop()
