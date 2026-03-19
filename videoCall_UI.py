@@ -5,8 +5,10 @@ import base64
 import io
 import threading
 
-RESOLUTION = (640, 480) # Local Display
-STREAM_RES = (320, 240) # Network Stream (Lower for speed)
+RESOLUTION = (640, 480)
+# INCREASED: Better balance between clarity and UDP packet limits
+STREAM_RES = (480, 360)
+
 
 class VideoCallUI:
     def __init__(self, root, client):
@@ -20,16 +22,16 @@ class VideoCallUI:
 
         self.toolbar = tk.Frame(root, bg="#eeeeee")
         self.toolbar.pack(side=tk.TOP, fill=tk.X)
-        tk.Button(self.toolbar, text="⬅ Back", command=self.client.request_menu_return).pack(side=tk.LEFT, padx=5, pady=2)
+        tk.Button(self.toolbar, text="⬅ Back", command=self.client.request_menu_return).pack(side=tk.LEFT, padx=5,
+                                                                                             pady=2)
 
         self.container = tk.Frame(root, bg="black")
         self.container.pack(expand=True, fill=tk.BOTH)
 
-        # Labels for Local and Remote video
-        self.local_label = tk.Label(self.container, bg="#222222", text="Waiting for Camera...", fg="white")
+        self.local_label = tk.Label(self.container, bg="#222222")
         self.local_label.pack(side=tk.LEFT, padx=5, pady=5, expand=True, fill=tk.BOTH)
 
-        self.remote_label = tk.Label(self.container, bg="#222222", text="Waiting for Peer...", fg="white")
+        self.remote_label = tk.Label(self.container, bg="#222222")
         self.remote_label.pack(side=tk.LEFT, padx=5, pady=5, expand=True, fill=tk.BOTH)
 
         self.is_running = True
@@ -41,30 +43,39 @@ class VideoCallUI:
 
         ret, frame = self.cap.read()
         if ret:
-            # 1. Prepare Local Preview (High Res)
             frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             pil_img = Image.fromarray(frame_rgb)
+
+            # Local high-res preview
             local_display = pil_img.resize(RESOLUTION)
             imgtk = ImageTk.PhotoImage(image=local_display)
             self.local_label.imgtk = imgtk
             self.local_label.configure(image=imgtk)
 
-            # 2. Prepare Network Frame (Low Res + Low Quality)
-            # Use a thread to send so we don't lag the UI
+            # Send in background thread to avoid UI stutter
             threading.Thread(target=self._process_and_send, args=(pil_img,), daemon=True).start()
 
-        # Increase delay to 50ms (~20 FPS) to reduce CPU strain
-        self.root.after(50, self.update_frame)
+        # INCREASED: 33ms is approximately 30 FPS for smoother motion
+        self.root.after(33, self.update_frame)
 
     def _process_and_send(self, pil_img):
-        """Processes and sends the frame in the background."""
         try:
             send_frame = pil_img.resize(STREAM_RES)
             buffer = io.BytesIO()
-            # Quality 30 is the 'sweet spot' for UDP stability
-            send_frame.save(buffer, format="JPEG", quality=30)
+            # INCREASED: Quality 65 provides much sharper details
+            send_frame.save(buffer, format="JPEG", quality=65)
+
             encoded_str = base64.b64encode(buffer.getvalue()).decode('utf-8')
-            self.client.send_video_udp(encoded_str)
+
+            # SAFETY CHECK: If the string is too big for UDP, we don't send it
+            if len(encoded_str) < 65000:
+                self.client.send_video_udp(encoded_str)
+            else:
+                # If too big, try sending a lower quality version as fallback
+                buffer = io.BytesIO()
+                send_frame.save(buffer, format="JPEG", quality=30)
+                encoded_str = base64.b64encode(buffer.getvalue()).decode('utf-8')
+                self.client.send_video_udp(encoded_str)
         except:
             pass
 
@@ -76,11 +87,9 @@ class VideoCallUI:
 
             imgtk = ImageTk.PhotoImage(image=peer_img)
             self.remote_label.imgtk = imgtk
-            self.remote_label.configure(image=imgtk)
-            # Remove the "Waiting" text once the first frame arrives
-            self.remote_label.configure(text="")
-        except Exception as e:
-            print(f"Video Decode Error: {e}")  # This will tell us if the data is corrupt
+            self.remote_label.configure(image=imgtk, text="")
+        except:
+            pass
 
     def destroy(self):
         self.is_running = False
