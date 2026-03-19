@@ -153,27 +153,35 @@ class Client:
                 break
 
     def _udp_receive_task(self):
-        """UDP Receiver: Dedicated solely to high-speed video frames."""
-        print(f"[*] UDP Listener active on port {self.port}")
+        """UDP Receiver: Now with Debugging Logs."""
+        print(f"[*] UDP Listener active on port {self.port}. Waiting for packets...")
         while True:
             try:
-                # 65507 is the absolute max size for a UDP datagram
                 data, addr = self.udp_sock.recvfrom(65507)
                 if not data:
                     continue
 
+                # DEBUG: Check if ANY data is arriving
+                # print(f"[UDP] Received {len(data)} bytes from {addr}")
+
                 plain = data.decode('utf-8', errors='ignore')
                 if plain.startswith("VDO:"):
-                    # Use after_idle to prevent flooding the main thread
+                    # Success! Data is arriving.
                     self.root.after_idle(lambda p=plain[4:]: self._handle_video(p))
             except Exception as e:
-                # This catches 'Connection Reset' errors common on Windows UDP
+                # print(f"[UDP Error] {e}")
                 continue
 
     def _handle_video(self, base64_data):
         """Specifically handles updating the UI with new video data."""
-        if self.app_launched and self.current_ui and hasattr(self.current_ui, 'update_remote_video'):
+        if not self.app_launched:
+            return
+
+        if self.current_ui and hasattr(self.current_ui, 'update_remote_video'):
             self.current_ui.update_remote_video(base64_data)
+        else:
+            # This helps find if the UI hasn't fully loaded yet
+            print("[!] Received video but UI is not ready.")
 
     def _handle_incoming(self, plain):
         """Routes incoming signals to the correct UI logic."""
