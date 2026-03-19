@@ -154,14 +154,26 @@ class Client:
 
     def _udp_receive_task(self):
         """UDP Receiver: Dedicated solely to high-speed video frames."""
+        print(f"[*] UDP Listener active on port {self.port}")
         while True:
             try:
+                # 65507 is the absolute max size for a UDP datagram
                 data, addr = self.udp_sock.recvfrom(65507)
-                plain = data.decode()
+                if not data:
+                    continue
+
+                plain = data.decode('utf-8', errors='ignore')
                 if plain.startswith("VDO:"):
-                    self.root.after(0, self._handle_incoming, plain)
-            except:
+                    # Use after_idle to prevent flooding the main thread
+                    self.root.after_idle(lambda p=plain[4:]: self._handle_video(p))
+            except Exception as e:
+                # This catches 'Connection Reset' errors common on Windows UDP
                 continue
+
+    def _handle_video(self, base64_data):
+        """Specifically handles updating the UI with new video data."""
+        if self.app_launched and self.current_ui and hasattr(self.current_ui, 'update_remote_video'):
+            self.current_ui.update_remote_video(base64_data)
 
     def _handle_incoming(self, plain):
         """Routes incoming signals to the correct UI logic."""
