@@ -11,21 +11,103 @@ class Client:
         self.peer_ip, self.peer_port = peer_ip, peer_port
         self.manager_ip = manager_ip
 
-        self.sock = None
-        self.manager_sock = None
+        self.sock = None  # TCP for Control/Text/Drawing
+        self.udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)  # UDP for Video
+        self.udp_sock.bind(("0.0.0.0", self.port))  # Use same port as TCP (perfectly valid)
 
+        self.manager_sock = None
         self.mode = None
         self.peer_mode = None
         self.app_launched = False
         self.current_ui = None
-
-        # Guard to prevent duplicate UI spawning
         self.is_ready = False
         self.lock = threading.Lock()
 
-        threading.Thread(target=self._connect_to_manager,args=(self.manager_ip, ), daemon=True).start()
+        threading.Thread(target=self._connect_to_manager, args=(self.manager_ip,), daemon=True).start()
 
-        # Inside SimpleClient.py
+    # ... (Keep _connect_to_manager, auto_connect, _listen_task, _connect_task as they are)
+
+    def _on_ready(self):
+        self.is_ready = True
+        from mainMenu_UI import MainMenuUI
+        self.root.after(0, lambda: self._init_ui(MainMenuUI))
+        # Start both TCP and UDP receivers
+        threading.Thread(target=self._receive_task, daemon=True).start()
+        threading.Thread(target=self._udp_receive_task, daemon=True).start()
+
+    def _init_ui(self, UIClass):
+        if self.current_ui: self.current_ui.destroy()
+        self.current_ui = UIClass(self.root, self)
+
+    def send_packet(self, text):
+        """Standard TCP delivery for Drawing and Text."""
+        packet = Protocol.prepare_packet(text)
+        try:
+            if self.sock: self.sock.sendall(packet)
+            if self.manager_sock: self.manager_sock.sendall(packet)
+        except:
+            pass
+
+    def send_video_udp(self, base64_str):
+        """High-speed UDP delivery for Video frames."""
+        try:
+            # We skip heavy AES encryption for video to reduce CPU lag
+            data = f"VDO:{base64_str}".encode()
+            self.udp_sock.sendto(data, (self.peer_ip, self.peer_port))
+        except Exception as e:
+            print(f"UDP Send Error: {e}")
+
+    # ... (Keep set_mode, _check_consensus, launch_tool as they are)
+
+    def _receive_task(self):
+        """TCP Receiver (Handles Drawing, Text, and Mode changes)."""
+        buffer = b""
+        while True:
+            try:
+                data = self.sock.recv(1048576)
+                if not data: break
+                buffer += data
+                while b"\n" in buffer:
+                    line, buffer = buffer.split(b"\n", 1)
+                    plain = Protocol.decrypt_packet(line)
+                    if plain: self.root.after(0, self._handle_incoming, plain)
+            except:
+                break
+
+    def _udp_receive_task(self):
+        """UDP Receiver (Dedicated solely to Video)."""
+        while True:
+            try:
+                data, addr = self.udp_sock.recvfrom(65507)  # Max UDP packet size
+                plain = data.decode()
+                if plain.startswith("VDO:"):
+                    self.root.after(0, self._handle_incoming, plain)
+            except:
+                continue
+
+    def _handle_incoming(self, plain):
+        if plain.startswith("MODE:"):
+            m = plain.split(":")[1]
+            if m == "menu":
+                self.reset_to_menu()
+            else:
+                self.peer_mode = m
+                if hasattr(self.current_ui, 'update_selection_visuals'):
+                    self.current_ui.update_selection_visuals(self.mode, self.peer_mode)
+                self._check_consensus()
+
+        elif self.app_launched and self.current_ui:
+            if plain.startswith("DRW:"):
+                coords = list(map(int, plain.split(":")[1].split(",")))
+                self.current_ui.remote_draw(*coords)
+            elif plain.startswith("TXT:"):
+                self.current_ui.sync_text(plain[4:])
+            elif plain.startswith("VDO:"):  # FIXED: Added the video handler
+                self.current_ui.update_remote_video(plain[4:])
+            elif plain.startswith("CLR:"):
+                if hasattr(self.current_ui, 'clear_canvas_remote'):
+                    self.current_ui.clear_canvas_remote()
+
 
     def _connect_to_manager(self, ip):
         while not self.manager_sock:
@@ -72,26 +154,10 @@ class Client:
             except:
                 time.sleep(1)
 
-    def _on_ready(self):
-        """Spawns the menu and receiver loop only once."""
-        self.is_ready = True
-        # Late import to break the circular dependency
-        from mainMenu_UI import MainMenuUI
-        self.root.after(0, lambda: self._init_ui(MainMenuUI))
-        threading.Thread(target=self._receive_task, daemon=True).start()
 
-    def _init_ui(self, UIClass):
-        # Clear any existing UI first just in case
-        if self.current_ui: self.current_ui.destroy()
-        self.current_ui = UIClass(self.root, self)
 
-    def send_packet(self, text):
-        packet = Protocol.prepare_packet(text)
-        try:
-            if self.sock: self.sock.sendall(packet)
-            if self.manager_sock: self.manager_sock.sendall(packet)
-        except:
-            pass
+
+
 
     def set_mode(self, new_mode):
         self.mode = new_mode
@@ -119,40 +185,9 @@ class Client:
             from videoCall_UI import VideoCallUI
             self.current_ui = VideoCallUI(self.root, self)
 
-    def _receive_task(self):
-        buffer = b""
-        while True:
-            try:
-                data = self.sock.recv(1048576)
-                if not data: break
-                buffer += data
-                while b"\n" in buffer:
-                    line, buffer = buffer.split(b"\n", 1)
-                    plain = Protocol.decrypt_packet(line)
-                    if plain: self.root.after(0, self._handle_incoming, plain)
-            except:
-                break
 
-    def _handle_incoming(self, plain):
-        if plain.startswith("MODE:"):
-            m = plain.split(":")[1]
-            if m == "menu":
-                self.reset_to_menu()
-            else:
-                self.peer_mode = m
-                if self.current_ui and hasattr(self.current_ui, 'update_selection_visuals'):
-                    self.current_ui.update_selection_visuals(self.mode, self.peer_mode)
-                self._check_consensus()
-        elif self.app_launched and self.current_ui:
-            if plain.startswith("DRW:"):
-                coords = list(map(int, plain.split(":")[1].split(",")))
-                self.current_ui.remote_draw(*coords)
-            elif plain.startswith("TXT:"):
-                self.current_ui.sync_text(plain[4:])
-            elif plain.startswith("CLR:"):
-                # This routes the signal to the new method in canvas_UI.py
-                if hasattr(self.current_ui, 'clear_canvas_remote'):
-                    self.current_ui.clear_canvas_remote()
+
+
 
     def request_menu_return(self):
         """Sends a wipe command to peer and manager before leaving."""

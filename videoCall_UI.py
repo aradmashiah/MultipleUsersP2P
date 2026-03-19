@@ -6,6 +6,8 @@ import base64
 import io
 
 RESOLUTION = (640, 480)
+
+
 class VideoCallUI:
     def __init__(self, root, client):
         self.root = root
@@ -54,29 +56,30 @@ class VideoCallUI:
         try:
             surface = self.cam.get_image()
             if surface:
-                # Convert Pygame surface to PIL Image
                 img_str = pygame.image.tostring(surface, "RGB")
                 pil_img = Image.frombytes("RGB", surface.get_size(), img_str)
 
-                # 1. Local Preview (Full Color, Sharp)
+                # 1. Local Preview
                 local_display = pil_img.resize(RESOLUTION)
                 imgtk = ImageTk.PhotoImage(image=local_display)
                 self.local_label.imgtk = imgtk
                 self.local_label.configure(image=imgtk)
 
-                # 2. Network Frame (REMOVED Grayscale conversion)
-                # 320x240 is 4x the pixels of your previous version
-                send_frame = pil_img.resize(RESOLUTION)
-
+                # 2. Prepare for UDP Send
+                # Resize to 480x360 to ensure it fits safely in one UDP datagram
+                send_frame = pil_img.resize((480, 360))
                 buffer = io.BytesIO()
-                # quality=60 is the sweet spot for HD detail without lag
-                send_frame.save(buffer, format="JPEG", quality=60)
+                send_frame.save(buffer, format="JPEG", quality=50)  # Lower quality = faster UDP
 
                 encoded_str = base64.b64encode(buffer.getvalue()).decode('utf-8')
-                self.client.send_packet(f"VDO:{encoded_str}")
+
+                # Use the new UDP method!
+                self.client.send_video_udp(encoded_str)
 
         except Exception as e:
             print(f"Camera Loop Error: {e}")
+
+        self.root.after(30, self.update_frame)
 
         # 3. CRITICAL FIX: Only ONE after() call at 30ms (approx 30 FPS)
         self.root.after(30, self.update_frame)
