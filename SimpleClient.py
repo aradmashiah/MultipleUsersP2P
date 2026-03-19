@@ -149,13 +149,14 @@ class Client:
                 self.current_ui.remote_draw(*coords)
             elif plain.startswith("TXT:"):
                 self.current_ui.sync_text(plain[4:])
-            elif plain.startswith("VDO:"):
-                self.current_ui.update_remote_video(plain[4:])
             elif plain.startswith("CLR:"):
+                # This routes the signal to the new method in canvas_UI.py
                 if hasattr(self.current_ui, 'clear_canvas_remote'):
                     self.current_ui.clear_canvas_remote()
 
     def request_menu_return(self):
+        """Sends a wipe command to peer and manager before leaving."""
+        self.send_packet("CLR:")
         self.send_packet("MODE:menu")
         self.root.after(0, self.reset_to_menu)
 

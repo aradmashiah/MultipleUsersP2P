@@ -25,7 +25,7 @@ class Protocol:
     def decrypt_packet(base64_data):
         """Decrypts and ignores malformed packets to prevent crashes."""
         try:
-            encrypted_bytes = base64.b64decode(base64_data)
+            encrypted_bytes = base64.decode(base64_data) if isinstance(base64_data, str) else base64.b64decode(base64_data)
             cipher = Cipher(algorithms.AES(Protocol.SHARED_KEY), modes.CBC(Protocol.SHARED_IV))
             decryptor = cipher.decryptor()
             padded_data = decryptor.update(encrypted_bytes) + decryptor.finalize()

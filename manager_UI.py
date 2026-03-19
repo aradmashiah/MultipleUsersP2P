@@ -8,58 +8,96 @@ from protocol import Protocol
 class ManagerUI:
     def __init__(self, root):
         self.root = root
-        self.root.title("P2P Session Manager - Multi-Tab Observer")
-        self.root.geometry("1000x700")
+        self.root.title("P2P Manager - Multi-View Observer")
+        self.root.geometry("1100x750")
 
-        # Tab Control
+        # Detect the local network IP to resolve 127.0.0.1 conflicts
+        self.local_network_ip = self.get_local_ip()
+
         self.notebook = ttk.Notebook(self.root)
         self.notebook.pack(expand=True, fill="both")
 
-        # Storage: { session_key: { "log": widget, "canvas": widget, "frame": widget } }
-        self.sessions = {}
-        # Mapping: { socket_object: session_key }
-        self.conn_map = {}
+        self.sessions = {}  # Stores UI widgets for each session
+        self.conn_map = {}  # Maps socket connections to session keys
 
+        self.create_system_tab()
+        # Start the backend listener in a separate thread
         threading.Thread(target=self.start_backend, daemon=True).start()
 
+    def get_local_ip(self):
+        """Helper to identify this machine's actual LAN IP."""
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            ip = s.getsockname()[0]
+            s.close()
+            return ip
+        except:
+            return "127.0.0.1"
+
+    def create_system_tab(self):
+        """Creates the initial log tab for system status."""
+        self.sys_frame = ttk.Frame(self.notebook)
+        self.notebook.add(self.sys_frame, text="System Log")
+        self.sys_log = scrolledtext.ScrolledText(self.sys_frame, font=("Consolas", 10))
+        self.sys_log.pack(fill=tk.BOTH, expand=True)
+
     def start_backend(self):
+        """Starts the server to listen for peer reporting."""
         server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         server.bind(("0.0.0.0", 9999))
-        server.listen(10)
-
+        server.listen(20)
         while True:
             conn, addr = server.accept()
             threading.Thread(target=self.handle_monitor, args=(conn, addr), daemon=True).start()
 
-    def get_session_key(self, my_ip, my_port, peer_ip, peer_port):
-        """Creates a unique key for a pair of users by sorting their addresses."""
-        user1 = (my_ip, int(my_port))
-        user2 = (peer_ip, int(peer_port))
-        # Sorting ensures (A, B) and (B, A) result in the same key
-        pair = sorted([user1, user2])
-        return f"{pair[0][0]}:{pair[0][1]} <-> {pair[1][0]}:{pair[1][1]}"
+    def create_session_tab(self, s_key):
+        """Creates a dedicated tab for a specific P2P pair."""
+        if s_key in self.sessions: return
 
-    def create_session_tab(self, session_key):
-        if session_key in self.sessions:
-            return self.sessions[session_key]
+        frame = ttk.Frame(self.notebook)
+        self.notebook.add(frame, text=s_key)
 
-        tab_frame = ttk.Frame(self.notebook)
-        self.notebook.add(tab_frame, text=session_key)
-
-        log = scrolledtext.ScrolledText(tab_frame, width=50, font=("Consolas", 10))
+        # Left side: Live Traffic Log
+        log = scrolledtext.ScrolledText(frame, width=35, font=("Consolas", 9))
         log.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-        canvas = tk.Canvas(tab_frame, bg="white", width=400, height=300, highlightthickness=1)
-        canvas.pack(side=tk.RIGHT, padx=5, pady=5)
+        # Right side: Observer Panel with View Toggles
+        obs_panel = tk.Frame(frame, width=450)
+        obs_panel.pack(side=tk.RIGHT, fill=tk.BOTH, padx=10)
 
-        self.sessions[session_key] = {"log": log, "canvas": canvas}
-        return self.sessions[session_key]
+        btn_f = tk.Frame(obs_panel)
+        btn_f.pack(pady=5)
+        tk.Button(btn_f, text="Canvas View", command=lambda: self.switch_view(s_key, "canvas")).pack(side=tk.LEFT,
+                                                                                                     padx=2)
+        tk.Button(btn_f, text="Text View", command=lambda: self.switch_view(s_key, "text")).pack(side=tk.LEFT, padx=2)
+
+        # View Container for Canvas and Text Editor mirrors
+        view_container = tk.Frame(obs_panel, bg="white", width=400, height=500)
+        view_container.pack(pady=10, fill=tk.BOTH, expand=True)
+        view_container.pack_propagate(False)
+
+        canvas = tk.Canvas(view_container, bg="white")
+        canvas.pack(fill=tk.BOTH, expand=True)
+
+        text_mirror = scrolledtext.ScrolledText(view_container, font=("Consolas", 10), state='disabled')
+
+        self.sessions[s_key] = {"log": log, "canvas": canvas, "text": text_mirror}
+
+    def switch_view(self, s_key, mode):
+        """Toggles between the Canvas mirror and Text mirror in the Manager."""
+        s = self.sessions[s_key]
+        if mode == "canvas":
+            s["text"].pack_forget()
+            s["canvas"].pack(fill=tk.BOTH, expand=True)
+        else:
+            s["canvas"].pack_forget()
+            s["text"].pack(fill=tk.BOTH, expand=True)
 
     def handle_monitor(self, conn, addr):
+        """Processes incoming data from clients."""
         buffer = b""
-        client_ip = addr[0]
-
         while True:
             try:
                 data = conn.recv(1048576)
@@ -67,43 +105,50 @@ class ManagerUI:
                 buffer += data
                 while b"\n" in buffer:
                     line, buffer = buffer.split(b"\n", 1)
-                    plain = Protocol._decrypt_aes_from_base64(line, Protocol.SHARED_KEY, Protocol.SHARED_IV)
+                    plain = Protocol.decrypt_packet(line)
 
-                    if plain.startswith("ID:"):
-                        # Registration: ID:MyPort:PeerIP:PeerPort
-                        _, my_port, peer_ip, peer_port = plain.split(":")
-                        # If peer_ip is 127.0.0.1, use the actual incoming client IP for grouping
-                        real_peer_ip = client_ip if peer_ip == "127.0.0.1" else peer_ip
+                    if plain and plain.startswith("ID:"):
+                        # Identify the P2P pair and group them into one tab
+                        p = plain.split(":")
+                        u1_ip = self.local_network_ip if addr[0] == "127.0.0.1" else addr[0]
+                        u2_ip = self.local_network_ip if p[2] == "127.0.0.1" else p[2]
 
-                        s_key = self.get_session_key(client_ip, my_port, real_peer_ip, peer_port)
+                        u1 = (u1_ip, int(p[1]))
+                        u2 = (u2_ip, int(p[3]))
+                        s_key = f"{sorted([u1, u2])[0]} <-> {sorted([u1, u2])[1]}"
+
                         self.conn_map[conn] = s_key
                         self.root.after(0, self.create_session_tab, s_key)
-                        self.root.after(0, self.log_to_session, s_key, f"SYSTEM: Peer {client_ip}:{my_port} joined.")
 
-                    elif conn in self.conn_map:
-                        s_key = self.conn_map[conn]
-                        self.root.after(0, self.process_session_data, s_key, client_ip, plain)
+                    elif plain and conn in self.conn_map:
+                        # Update the UI on the main thread
+                        self.root.after(0, self.update_ui, self.conn_map[conn], plain)
             except:
                 break
 
-    def log_to_session(self, s_key, message):
-        if s_key in self.sessions:
-            log = self.sessions[s_key]["log"]
-            log.configure(state='normal')
-            log.insert(tk.END, f"{message}\n")
-            log.see(tk.END)
-            log.configure(state='disabled')
-
-    def process_session_data(self, s_key, sender_ip, data):
-        tab = self.sessions[s_key]
-        self.log_to_session(s_key, f"[{sender_ip}] {data[:60]}...")
+    def update_ui(self, s_key, data):
+        """Updates the mirrors based on peer activity."""
+        if s_key not in self.sessions: return
+        s = self.sessions[s_key]
 
         if data.startswith("DRW:"):
-            coords = list(map(int, data.split(":")[1].split(",")))
-            x1, y1, x2, y2 = [c // 2 for c in coords]
-            tab["canvas"].create_line(x1, y1, x2, y2, fill="blue", width=1)
+            # Mirror drawing on half-scale canvas
+            c = list(map(int, data.split(":")[1].split(",")))
+            s["canvas"].create_line(c[0] // 2, c[1] // 2, c[2] // 2, c[3] // 2, fill="blue")
+
+        elif data.startswith("TXT:"):
+            # Update the read-only text mirror
+            s["text"].config(state='normal')
+            s["text"].delete("1.0", tk.END)
+            s["text"].insert("1.0", data[4:])
+            s["text"].config(state='disabled')
+
         elif data.startswith("CLR:"):
-            tab["canvas"].delete("all")
+            # Wipe both views when a user clears or returns to menu
+            s["canvas"].delete("all")
+            s["text"].config(state='normal')
+            s["text"].delete("1.0", tk.END)
+            s["text"].config(state='disabled')
 
 
 if __name__ == "__main__":
