@@ -1,5 +1,4 @@
-import pygame
-import pygame.camera
+import cv2
 import tkinter as tk
 from PIL import Image, ImageTk
 import base64
@@ -14,21 +13,11 @@ class VideoCallUI:
         self.client = client
         self.root.title(f"P2P Video - Port {client.port}")
 
-        # 1. Initialize Pygame Camera
-        try:
-            pygame.init()
-            pygame.camera.init()
-            cam_list = pygame.camera.list_cameras()
-            if cam_list:
-                # Initialize at standard 640x480
-                self.cam = pygame.camera.Camera(cam_list[0], RESOLUTION)
-                self.cam.start()
-            else:
-                self.cam = None
-                print("[!] No camera detected")
-        except Exception as e:
-            self.cam = None
-            print(f"[!] Pygame Camera Error: {e}")
+        # 1. Initialize OpenCV Camera (much more reliable than Pygame)
+        self.cap = cv2.VideoCapture(0)  # 0 is usually the default webcam
+        if not self.cap.isOpened():
+            print("[!] OpenCV could not open the camera.")
+            self.cap = None
 
         # 2. UI Layout
         self.toolbar = tk.Frame(root, bg="#eeeeee")
@@ -39,7 +28,6 @@ class VideoCallUI:
         self.container = tk.Frame(root, bg="black")
         self.container.pack(expand=True, fill=tk.BOTH)
 
-        # Labels for Local and Remote video
         self.local_label = tk.Label(self.container, bg="#222222")
         self.local_label.pack(side=tk.LEFT, padx=10, pady=10, expand=True)
 
@@ -50,42 +38,33 @@ class VideoCallUI:
         self.update_frame()
 
     def update_frame(self):
-        if not self.is_running or self.cam is None:
+        if not self.is_running or self.cap is None:
             return
 
-        try:
-            surface = self.cam.get_image()
-            if surface:
-                img_str = pygame.image.tostring(surface, "RGB")
-                pil_img = Image.frombytes("RGB", surface.get_size(), img_str)
+        ret, frame = self.cap.read()
+        if ret:
+            # OpenCV uses BGR, we need RGB for Tkinter/PIL
+            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            pil_img = Image.fromarray(frame_rgb)
 
-                # 1. Local Preview
-                local_display = pil_img.resize(RESOLUTION)
-                imgtk = ImageTk.PhotoImage(image=local_display)
-                self.local_label.imgtk = imgtk
-                self.local_label.configure(image=imgtk)
+            # 1. Local Preview
+            local_display = pil_img.resize(RESOLUTION)
+            imgtk = ImageTk.PhotoImage(image=local_display)
+            self.local_label.imgtk = imgtk
+            self.local_label.configure(image=imgtk)
 
-                # 2. Prepare for UDP Send
-                # Resize to 480x360 to ensure it fits safely in one UDP datagram
-                send_frame = pil_img.resize((480, 360))
-                buffer = io.BytesIO()
-                send_frame.save(buffer, format="JPEG", quality=50)  # Lower quality = faster UDP
+            # 2. Network Frame (UDP optimized)
+            # Resize smaller for UDP stability
+            send_frame = pil_img.resize((480, 360))
+            buffer = io.BytesIO()
+            send_frame.save(buffer, format="JPEG", quality=50)
 
-                encoded_str = base64.b64encode(buffer.getvalue()).decode('utf-8')
+            encoded_str = base64.b64encode(buffer.getvalue()).decode('utf-8')
+            self.client.send_video_udp(encoded_str)
 
-                # Use the new UDP method!
-                self.client.send_video_udp(encoded_str)
-
-        except Exception as e:
-            print(f"Camera Loop Error: {e}")
-
-        self.root.after(30, self.update_frame)
-
-        # 3. CRITICAL FIX: Only ONE after() call at 30ms (approx 30 FPS)
         self.root.after(30, self.update_frame)
 
     def update_remote_video(self, base64_data):
-        """Displays the high-resolution frame from the peer"""
         try:
             img_data = base64.b64decode(base64_data)
             peer_img = Image.open(io.BytesIO(img_data))
@@ -94,13 +73,12 @@ class VideoCallUI:
             imgtk = ImageTk.PhotoImage(image=peer_img)
             self.remote_label.imgtk = imgtk
             self.remote_label.configure(image=imgtk)
-        except Exception as e:
+        except:
             pass
 
     def destroy(self):
-        """Clean up when leaving video mode"""
         self.is_running = False
-        if self.cam:
-            self.cam.stop()
-        self.toolbar.pack_forget()
-        self.container.pack_forget()
+        if self.cap:
+            self.cap.release()  # Properly release the hardware
+        self.toolbar.destroy()
+        self.container.destroy()
