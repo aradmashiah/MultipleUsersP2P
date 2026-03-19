@@ -69,18 +69,18 @@ class VideoCallUI:
             pass
 
     def update_remote_video(self, base64_data):
-        """Displays the incoming frame from the peer."""
         try:
             img_data = base64.b64decode(base64_data)
             peer_img = Image.open(io.BytesIO(img_data))
-            # Stretch it back to full size for display
             peer_img = peer_img.resize(RESOLUTION)
 
             imgtk = ImageTk.PhotoImage(image=peer_img)
             self.remote_label.imgtk = imgtk
             self.remote_label.configure(image=imgtk)
-        except:
-            pass
+            # Remove the "Waiting" text once the first frame arrives
+            self.remote_label.configure(text="")
+        except Exception as e:
+            print(f"Video Decode Error: {e}")  # This will tell us if the data is corrupt
 
     def destroy(self):
         self.is_running = False
